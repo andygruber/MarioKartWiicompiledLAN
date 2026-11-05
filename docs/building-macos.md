@@ -250,17 +250,17 @@ During the build, CMake automatically copies the required runtime assets into `b
 ## 7. Step 5: Running Executables from the Build Folder
 
 ### Configure `Config.toml`
-The runtime reads configuration from `~/Library/Application Support/WiiCompiled/Config.toml`.
+The runtime reads configuration from `~/Library/Application Support/MarioKartWiicompiledLAN/Config.toml`.
 
 Create the directory and configuration file:
 
 ```bash
-mkdir -p "$HOME/Library/Application Support/WiiCompiled"
+mkdir -p "$HOME/Library/Application Support/MarioKartWiicompiledLAN"
 ```
 
 #### For Base Game Only (WiiCompiled):
 ```toml
-# ~/Library/Application Support/WiiCompiled/Config.toml
+# ~/Library/Application Support/MarioKartWiicompiledLAN/Config.toml
 [video]
 widescreen = true
 resolution_multiplier = 1.0
@@ -272,7 +272,7 @@ dvd_root = "/absolute/path/to/Wiicompiled/Assets/DATA"
 
 #### For Base Game and Retro Rewind:
 ```toml
-# ~/Library/Application Support/WiiCompiled/Config.toml
+# ~/Library/Application Support/MarioKartWiicompiledLAN/Config.toml
 [video]
 widescreen = true
 resolution_multiplier = 1.0

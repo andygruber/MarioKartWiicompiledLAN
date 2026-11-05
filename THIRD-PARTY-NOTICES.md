@@ -110,7 +110,45 @@ fallback - though this project's x86_64-only target only ever compiles amd64.c) 
 Source: <https://github.com/higan-emu/libco>. Full license text:
 `runtime/third_party/libco/LICENSE`.
 
+### MKW LAN multiplayer (rmc-local-net BrainSlug module) - MIT
+
+Copyright (C) 2014 Alex Chadwick (Chadderz) and MrBean35000vr; multi-instance and port fallback
+changes by Luporion (v0.9-Luporion.2). The module's sources carry the MIT permission notice below
+(its BrainSlug metadata names the license "BSD").
+`runtime/src/hle/net/lan_mode.cpp` is a native C++ port of the module's `main.c`,
+`network_thread.c` and `ui.c`, `projects/mkwii/lan_patches.txt` restates its instruction patches
+for static translation, and `runtime/src/hle/net/lan_mode_bmg.inc` embeds its `lan.bmg` message
+file unchanged. Source:
+<https://github.com/Luporion/MKW-LAN-Dolphin-Fork/tree/v0.9-Luporion.2/src/brainslug-wii-vanilla/modules/rmc-local-net>.
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+> and associated documentation files (the "Software"), to deal in the Software without
+> restriction, including without limitation the rights to use, copy, modify, merge, publish,
+> distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+> Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+> BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 ---
+
+## Bundled in the LAN player tool (`Launcher/LanPlayerSetup`)
+
+`dotnet publish` restores these NuGet packages and bundles them into the self-contained
+`LanPlayerSetup` executable, together with the .NET 8 runtime (MIT, <https://github.com/dotnet/runtime>).
+
+| Component | Version | License | Upstream |
+| --- | --- | --- | --- |
+| Avalonia (incl. Avalonia.Desktop, Avalonia.Themes.Fluent) | 11.3.22 | MIT | <https://github.com/AvaloniaUI/Avalonia> |
+| SkiaSharp / HarfBuzzSharp (Avalonia rendering dependencies) | as pinned by Avalonia | MIT | <https://github.com/mono/SkiaSharp> |
+| Inter font (Avalonia.Fonts.Inter) | 11.3.22 | SIL Open Font License 1.1 | <https://github.com/rsms/inter> |
+| Tomlyn (via WiiCompiled.Setup.Common) | 2.10.1 | BSD-2-Clause | <https://github.com/xoofx/Tomlyn> |
 
 ## Fetched at build time and redistributed in release builds
 

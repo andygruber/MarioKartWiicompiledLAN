@@ -70,6 +70,8 @@ native_prebuilt_dir=""
 sysroot=""
 setup_version=""
 x86_cpu_profile=auto
+extra_cmake_args=()
+lan=0
 
 usage() {
     cat <<'EOF'
@@ -98,6 +100,13 @@ Usage: local-build.sh --output-dir DIR [options]
                                    Launcher/Directory.Build.props when present)
   --x86-cpu-profile {auto|v2|v3}   x86-64 instruction set to build for (default: auto, v3 when
                                    this machine supports it)
+  --lan                            Build the base game with LAN multiplayer: the WFC menu plays
+                                   directly with other consoles on the local network (port of
+                                   the rmc-local-net BrainSlug module). Needs the project's
+                                   lan_patches.txt (PAL only); not valid for Retro Rewind
+  --cmake-arg ARG                  Extra argument passed verbatim to the CMake configure step
+                                   (repeatable), e.g. --cmake-arg -DSDL_X11_XSCRNSAVER=OFF on hosts
+                                   missing optional SDL development packages
 EOF
 }
 
@@ -124,6 +133,8 @@ while [[ $# -gt 0 ]]; do
         --sysroot) sysroot=$2; shift 2 ;;
         --setup-version) setup_version=$2; shift 2 ;;
         --x86-cpu-profile) x86_cpu_profile=$2; shift 2 ;;
+        --cmake-arg) extra_cmake_args+=("$2"); shift 2 ;;
+        --lan) lan=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) fail "unknown argument: $1" ;;
     esac
@@ -160,6 +171,9 @@ else
     if [[ "$has_offline_retro_wfc" -eq "$skip_retro_wfc_payload" ]]; then
         fail "Choose exactly one Retro-WFC mode: --retro-wfc-offline-dir or --skip-retro-wfc-payload."
     fi
+fi
+if [[ "$lan" -eq 1 && "$builds_retro" -eq 1 ]]; then
+    fail "--lan is valid only for the base profile."
 fi
 if [[ "$profile" == "both" && -z "$base_output_dir" ]]; then
     fail "--base-output-dir is required with --profile both; --output-dir receives the Retro Rewind product."
@@ -226,6 +240,14 @@ assert_file "$assets/StaticR.rel" "Extracted StaticR.rel (see translator/README.
 project=$(mkw_resolve_project "$workspace" "$assets") || fail "the extracted game cannot be translated"
 region=$(mkw_project_pin "$project" region)
 [[ -n "$region" ]] || fail "Could not find the region of $project"
+# LAN multiplayer is a static guest patch set the translator applies to the image before every
+# step, so translation, data initialization, manifests and shards all see the same bytes.
+guest_patch_args=()
+if (( lan )); then
+    lan_patches=$(dirname "$project")/lan_patches.txt
+    assert_file "$lan_patches" "LAN patch set for this game release (LAN multiplayer is PAL only)"
+    guest_patch_args=(--guest-patches "$lan_patches")
+fi
 
 # The AppImage bundles Clang, but Linux startup objects and the C/C++ link runtimes
 # still come from the host. Check them before the expensive translation so a missing
@@ -315,6 +337,7 @@ fi
 
 translator_identity_input=${translator_bin:-$(dirname "$translator_dll")}
 translation_fingerprint=$(mkw_translation_identity "$workspace" "$translator_identity_input" "$script_dir/local-build.sh")
+translation_fingerprint=$(printf '%s lan=%s\n' "$translation_fingerprint" "$lan" | mkw_sha256)
 reuse_base=0
 if [[ "$(mkw_read_identity "$translation_provenance" TranslationFingerprint)" == "$translation_fingerprint" \
       && -f "$base_metadata" && -f "$base_manifest" ]]; then
@@ -357,13 +380,13 @@ else
     mkdir -p "$generated" "$base_manifest_dir"
 
     log_step translate-base "Translating the user-owned base game"
-    translator translate-recursive "$entry_point" --project "$project" \
+    translator translate-recursive "$entry_point" --project "$project" "${guest_patch_args[@]}" \
         --outdir "$functions" --output-metadata "$base_metadata" \
         --production-source-bundle "$generated/base_translation_sources.bin" \
         --no-function-files --prune-stale --threads "$translator_threads"
 
     log_step emit-base-manifest "Creating the local base translation manifest"
-    translator emit-base-manifest --project "$project" --out "$base_manifest_dir" \
+    translator emit-base-manifest --project "$project" "${guest_patch_args[@]}" --out "$base_manifest_dir" \
         --functions-dir "$functions" --translation-output-metadata "$base_metadata" --region "$region"
 
     mkw_write_identity "$translation_provenance" TranslationFingerprint "$translation_fingerprint"
@@ -391,9 +414,9 @@ if (( builds_retro )); then
 fi
 
 log_step generate-data-init "Generating local game data initialization"
-translator generate-data-init --project "$project"
+translator generate-data-init --project "$project" "${guest_patch_args[@]}"
 
-shard_args=(emit-build-shards --project "$project" --base-metadata "$base_metadata"
+shard_args=(emit-build-shards --project "$project" "${guest_patch_args[@]}" --base-metadata "$base_metadata"
     --base-functions-dir "$functions" --native-source-dir "$workspace/runtime/src" --out "$shards")
 if (( builds_retro )); then
     retro_out=$workspace/build/mods/retro_rewind_full_cpp
@@ -497,6 +520,8 @@ else
     configure_args+=(-UCMAKE_SYSROOT)
 fi
 
+configure_args+=("${extra_cmake_args[@]}")
+
 log_step configure-native "Configuring the native toolchain"
 "$cmake_bin" "${configure_args[@]}"
 mkw_write_identity "$toolchain_provenance" ToolchainFingerprint "$toolchain_fingerprint"
@@ -546,6 +571,7 @@ publish_built_product() {
 {
   "SchemaVersion": 1,
   "Profile": "$provenance_profile",
+  "LanMultiplayer": $( (( lan )) && echo true || echo false ),
   "BuiltUtc": "$built_utc",
   "DolSha256": "$dol_sha",
   "RelSha256": "$rel_sha",

@@ -20,7 +20,8 @@ public sealed class RuntimeConfigGenerator
         uint sda1Base,
         uint sda2Base,
         string outputPath,
-        string projectName = "PowerPC DOL")
+        string projectName = "PowerPC DOL",
+        string guestPatchSet = "")
     {
         var sb = new StringBuilder();
         sb.AppendLine($"// AUTO-GENERATED for {projectName}");
@@ -46,6 +47,13 @@ public sealed class RuntimeConfigGenerator
         // SDA2 (r2) - read-only small data
         sb.AppendLine($"// _SDA2_BASE_ (r2): Base pointer for .sdata2/.sbss2 sections");
         sb.AppendLine($"constexpr uint32_t SDA2_BASE = 0x{sda2Base:X8}u;  // memory.sda2_base");
+        sb.AppendLine();
+
+        // Name of the static guest patch set (translator --guest-patches) baked into this
+        // translation, empty for the unmodified game. Runtime natives that only make sense
+        // together with a patch set check this before changing behaviour.
+        sb.AppendLine("// Static guest patch set baked into this translation (empty: none)");
+        sb.AppendLine($"inline constexpr const char GUEST_PATCH_SET[] = \"{guestPatchSet}\";");
         sb.AppendLine();
 
 

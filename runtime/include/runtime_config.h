@@ -113,7 +113,7 @@ inline std::filesystem::path PathFromUtf8(std::string_view text) {
 }
 
 inline constexpr const char* kConfigFileName = "Config.toml";
-inline constexpr const char* kApplicationDirectoryName = "WiiCompiled";
+inline constexpr const char* kApplicationDirectoryName = "MarioKartWiicompiledLAN";
 
 // Portable layout. A directory holding kPortableMarkerFileName is a portable root; every piece of
 // runtime user state (Config.toml, NAND, Cache, Logs) lives in <root>/UserData instead of

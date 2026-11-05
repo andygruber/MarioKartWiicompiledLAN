@@ -38,7 +38,13 @@ CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
 var command = args.Length > 0 ? args[0] : "info";
 var (projectOption, tailWithoutProject) = ExtractOption(args.Skip(1).ToArray(), "--project");
-var (profileOption, tail) = ExtractOption(tailWithoutProject, "--profile");
+var (profileOption, tailWithoutProfile) = ExtractOption(tailWithoutProject, "--profile");
+// A static word-patch set (see GuestPatchSet) applied to the loaded image before every command
+// sees it, so translation, data initialization and manifests all agree on the patched bytes.
+var (guestPatchesOption, tail) = ExtractOption(tailWithoutProfile, "--guest-patches");
+var guestPatchSet = !string.IsNullOrWhiteSpace(guestPatchesOption)
+    ? GuestPatchSet.Load(guestPatchesOption)
+    : null;
 var project = !string.IsNullOrWhiteSpace(projectOption)
     ? TranslationProjectConfig.Load(projectOption)
     : null;
@@ -2752,7 +2758,7 @@ ProgramImage BuildSyntheticModProgramImage(string outDir, OverlayBuildResult ove
     var loadedProject = RequireProject();
     var rel = relFile.Value ?? throw new InvalidOperationException("Kamek mod translation currently requires the project's single configured REL.");
     var relImage = rel.BuildImage(loadedProject.Inputs.Rel!.LoadAddress);
-    var baseImage = new ProgramImageBuilder().Build(dolFile.Value, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
+    var baseImage = BuildProjectImage(dolFile.Value, relImage);
     var memory = baseImage.Memory.ToArray();
 
     CopyFileToGuest(
@@ -2894,7 +2900,7 @@ int RunEmitBaseManifest(string[] argsTail)
 
     var rel = relFile.Value ?? throw new InvalidOperationException("Base mod manifest generation currently requires the project's single configured REL.");
     var relImage = rel.BuildImage(loadedProject.Inputs.Rel!.LoadAddress);
-    var baseImage = new ProgramImageBuilder().Build(dolFile.Value, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
+    var baseImage = BuildProjectImage(dolFile.Value, relImage);
     var result = BaseManifestBuilder.BuildAndWrite(
         dolFile.Value,
         rel,
@@ -2932,7 +2938,8 @@ int RunGenerateDataInit()
     // Generate runtime configuration header with the manifest's SDA base pointers
     var (dataInitSda1Base, dataInitSda2Base) = loadedProject.RequireSdaBases();
     RuntimeConfigGenerator.GenerateConfigHeader(
-        dataInitSda1Base, dataInitSda2Base, runtimeConfigOutput, loadedProject.Identity.DisplayName);
+        dataInitSda1Base, dataInitSda2Base, runtimeConfigOutput, loadedProject.Identity.DisplayName,
+        guestPatchSet?.Name ?? string.Empty);
 
     // Load the REL file for runtime embedding (apply relocations since runtime does not OSLink)
     RelImage? relImage = null;
@@ -3837,13 +3844,27 @@ ProgramImage LoadImage()
         sda1Base,
         sda2Base,
         loadedProject.Output.RuntimeConfig,
-        loadedProject.Identity.DisplayName);
+        loadedProject.Identity.DisplayName,
+        guestPatchSet?.Name ?? string.Empty);
     Console.WriteLine(
         $"[translator] SDA bases: r13 (_SDA_BASE_) 0x{sda1Base:X8}, r2 (_SDA2_BASE_) 0x{sda2Base:X8} " +
         $"(entry 0x{dol.EntryPoint:X8}).");
 
     var relImage = relFile.Value?.BuildImage(loadedProject.Inputs.Rel!.LoadAddress);
-    return new ProgramImageBuilder().Build(dol, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
+    return BuildProjectImage(dol, relImage);
+}
+
+ProgramImage BuildProjectImage(DolFile dol, RelImage? relImage)
+{
+    var loadedProject = RequireProject();
+    var built = new ProgramImageBuilder().Build(dol, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
+    if (guestPatchSet is null)
+        return built;
+    var patched = guestPatchSet.ApplyTo(built);
+    Console.WriteLine(
+        $"[translator] Guest patch set '{guestPatchSet.Name}': {guestPatchSet.Words.Count:N0} word(s) applied " +
+        $"({guestPatchSet.SourcePath}).");
+    return patched;
 }
 
 DolFile LoadDol()

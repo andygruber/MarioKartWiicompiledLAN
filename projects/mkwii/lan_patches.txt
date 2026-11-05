@@ -1,0 +1,86 @@
+# LAN multiplayer patch set for Mario Kart Wii PAL (RMCP01).
+#
+# Static port of the instruction patches made by the rmc-local-net BrainSlug module
+# (LAN mod by Chadderz and MrBean35000vr, v0.9-Luporion.2 fork by Luporion,
+# https://github.com/Luporion/MKW-LAN-Dolphin-Fork). The function replacements and the
+# discovery thread are native code in runtime/src/hle/net/lan_mode.cpp, which also owns
+# the trampoline and data addresses at 0x819F0000 used below.
+#
+# Format: <address> <expected original word> -> <replacement word | b/bl target>
+# Applied with: Translator.Cli <command> --guest-patches projects/mkwii/lan_patches.txt
+
+set lan
+
+# DWC_ConnectToGameServerAsync: force us to know ourselves
+800D1BA0 806D96F0 -> 48000100
+800D1CAC 38000000 -> 38000001
+
+# DWCi_SetError: drop the error code so online processing is never blocked
+800CCC74 906D96A8 -> 60000000
+
+# Prevent error 5 when sending packets
+800D5F88 40820014 -> 48000014
+
+# dwc_think: disconnect gracefully on a state machine lockup while joining
+800D6534 93FB0740 -> 3C60809C
+800D6538 806D970C -> 80631E38
+800D653C 88030895 -> 80630000
+800D6540 2C000000 -> 80630274
+800D6544 41820170 -> 80A3035C
+800D6548 88A30723 -> 2C050001
+800D654C 389E0238 -> 40821A80
+800D6550 38600040 -> 38A00002
+800D6554 38C00005 -> 90A3035C
+800D6558 4CC63182 -> 48001A74
+
+# Force no network error at login
+80673038 41820060 -> 48000060
+
+# mkw_get_fc_for_current_license: use the session PID instead of the save file
+80663638 3C630001 -> 3C60819F
+8066363C 38638FF0 -> 38631000
+
+# mkw_load_friends_list_from_save: populate the roster from discovered LAN peers
+805D210C 7C840214 -> 60000000
+805D2110 388459D0 -> 7FA5EB78
+805D2114 4BF4759D -> bl 819F0000
+805D2120 41820064 -> 60000000
+
+# mkw_copy_friends_list_to_save: never save the LAN roster
+805D21B4 9421FFE0 -> 4E800020
+
+# Limit WFC to the friends section
+80647958 3860008B -> 3860008D
+8064D614 41820010 -> 41820028
+8064D518 41820010 -> 41820030
+
+# Stop ghosts from being sent to WFC
+80677444 9421FD40 -> 38600000
+80677448 7C0802A6 -> 4E800020
+
+# mkw_net_main_thread: high data rate
+806579B0 4BB6203D -> bl 819F0010
+80657EA8 28040011 -> 28040007
+80657F5C 7C7A1B78 -> 3B400000
+
+# Mario Kart Channel button: show the LAN notice instead
+808511E0 3C60809C -> bl 819F0020
+808511E4 80831E38 -> 480002F8
+
+# Disable check rankings
+8085B4BC 3C60809C -> 48000724
+
+# No Idle Disconnect (Gecko code by Bully, recommended by the LAN mod's README):
+# the online idle counters never advance, so a player without input (or a second
+# instance on the same PC whose window has no focus) is not kicked after ~30 s.
+80521408 38030001 -> 38000000
+8053EC94 38040001 -> 38000000
+8053EF6C 38030001 -> 38000000
+8053F0B4 38030001 -> 38000000
+8053F124 38030001 -> 38000000
+
+# Native trampoline stubs (blr); the runtime registers natives at these addresses
+819F0000 00000000 -> 4E800020
+819F0010 00000000 -> 4E800020
+819F0020 00000000 -> 4E800020
+819F0030 00000000 -> 4E800020

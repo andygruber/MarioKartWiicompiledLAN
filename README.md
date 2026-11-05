@@ -180,6 +180,10 @@ translation, generating the manifest and build graph, and compiling, see [`trans
 
 For a step-by-step guide on compiling both WiiCompiled and Retro Rewind from source on macOS (Apple Silicon), see the [macOS Build Guide](docs/building-macos.md).
 
+To build the base game with **LAN multiplayer** (the WFC menu plays directly with other players on the
+local network, no server needed), pass `--lan` to `Launcher/local-build.sh`. See
+[LAN multiplayer](docs/lan-multiplayer.md).
+
 ## FAQ
 
 **Is this an emulator?**
@@ -205,7 +209,7 @@ audio, input, GX, everything the game touches.
 
 **The game crashed / stopped with an error.**
 Errors are deliberately loud instead of quietly swallowed. Send a report along with the run log
-from `%LOCALAPPDATA%\WiiCompiled\Logs`.
+from `%LOCALAPPDATA%\MarioKartWiicompiledLAN\Logs`.
 
 **Will you fix original bugs?**
 Not in the base game, behavior identical to real hardware is the goal. Only report things where this port differs
