@@ -97,6 +97,35 @@ These limitations come from the original module:
 - After a disconnect, leave the LAN menu on both sides and enter it again.
 - Rankings, ghost uploads and the Mario Kart Channel are disabled.
 
+## Release packages (Docker)
+
+`Launcher/release/` builds portable, ready-to-play packages in Docker. Use a separate clean
+checkout with `Assets/` (the extracted disc) and `Launcher/artifacts/portable-tools`
+(`Launcher/prepare-portable-tools.sh --arch x86_64`) in it. The native build caches belong to
+the workspace.
+
+```bash
+Launcher/release/build-linux.sh   --output-dir ../out-linux     # Ubuntu 22.04, glibc 2.35
+Launcher/release/build-windows.sh --output-dir ../out-windows   # llvm-mingw cross build
+Launcher/release/package.sh --game-data Assets/DATA \
+    --linux-build ../out-linux --linux-player out/lan-player/linux-x64/LanPlayerSetup \
+    [--windows-build ../out-windows --windows-player out/lan-player/win-x64/LanPlayerSetup.exe]
+```
+
+- **Linux** (`Dockerfile.linux`): the repository's portable clang on Ubuntu 22.04. libstdc++ comes
+  from GCC 13 (the prebuilt Dawn needs it) and is linked statically. `MKW_GLIBC_C23_COMPAT`
+  supplies the four glibc 2.38 `__isoc23_strto*` functions Dawn references. The binary needs only
+  glibc 2.35, zlib and the usual desktop libraries SDL loads at run time.
+- **Windows** (`Dockerfile.windows`): the Linux-hosted build of the same llvm-mingw release the
+  Windows build uses. Wine runs Microsoft's `cppwinrt.exe` once, at image build time, to generate
+  the C++/WinRT headers. `MKW_ASM_TARGET=windows` makes the translator emit COFF assembly, and
+  `mingw-case-headers.sh` aliases mixed-case Windows header names. Wine can also smoke-test the
+  result (see the script comments).
+- **Package** (`package.sh`): `game/DATA`, `linux/` and/or `windows/`, a `README.txt` built from
+  `README-package.txt`, and `portable.txt` plus `UserData/Config.toml` with
+  `dvd_root = "../game/DATA"`. The game and LanPlayerSetup then keep everything in the package
+  folder. The package contains the game's data, so it is only for people who own the game.
+
 ## How it works
 
 Translated code cannot be patched at run time, so the module is split in two:

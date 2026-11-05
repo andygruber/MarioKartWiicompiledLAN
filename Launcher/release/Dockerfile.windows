@@ -1,0 +1,47 @@
+# Build environment for the Windows release, cross-compiled on Linux.
+#
+# Compiler: llvm-mingw, the same toolchain release (clang 22, mingw-w64 UCRT, libc++) the Windows
+# build uses (Launcher/Prepare-PortableTools.ps1), in its Linux-hosted variant.
+# Wine runs the Windows-only cppwinrt.exe once to generate the C++/WinRT headers the runtime
+# needs (Launcher/Prepare-Dependencies.ps1 does the same on Windows, from the machine's own
+# metadata; here the metadata comes from the Windows SDK contracts NuGet package). Wine is also
+# available to smoke-test the built game.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg git make python3 file unzip xz-utils xvfb xauth \
+    && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu 22.04's Wine 6.0 exits silently from cppwinrt.exe; WineHQ's current stable works.
+RUN dpkg --add-architecture i386 && mkdir -pm755 /etc/apt/keyrings \
+    && curl -fsSL -o /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key \
+    && curl -fsSL -o /etc/apt/sources.list.d/winehq-jammy.sources \
+        https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources \
+    && apt-get update && apt-get install -y --install-recommends winehq-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG LLVM_MINGW=llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64
+ARG LLVM_MINGW_SHA256=534b92e067b22a6b4441f48ae9240a3341b17825d04d577eab0cf85c44b4deda
+RUN curl -fsSL -o /tmp/llvm-mingw.tar.xz \
+        "https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/${LLVM_MINGW}.tar.xz" \
+    && echo "${LLVM_MINGW_SHA256}  /tmp/llvm-mingw.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/llvm-mingw.tar.xz -C /opt && mv "/opt/${LLVM_MINGW}" /opt/llvm-mingw \
+    && rm /tmp/llvm-mingw.tar.xz
+
+ARG CPPWINRT_SHA256=a8993608ae9263a8288e1a1d9ee2684a5632f4acc59e1e89ddd86b3b889a7367
+ARG CONTRACTS_SHA256=0e78a4b1f7d40bb4e0400a6f11517c24854ea1c6074bd69e647ce26c17c82d9b
+RUN mkdir -p /tmp/winrt && cd /tmp/winrt \
+    && curl -fsSL -o cppwinrt.nupkg https://www.nuget.org/api/v2/package/Microsoft.Windows.CppWinRT/3.0.260818.1 \
+    && curl -fsSL -o contracts.nupkg https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.contracts/10.0.26100.4188/microsoft.windows.sdk.contracts.10.0.26100.4188.nupkg \
+    && echo "${CPPWINRT_SHA256}  cppwinrt.nupkg" | sha256sum -c - \
+    && echo "${CONTRACTS_SHA256}  contracts.nupkg" | sha256sum -c - \
+    && unzip -q cppwinrt.nupkg -d tool && unzip -q contracts.nupkg -d contracts
+
+RUN cd /tmp/winrt && export WINEPREFIX=/tmp/winrt/prefix WINEDEBUG=-all \
+    && wine tool/bin/cppwinrt.exe -input contracts/ref/netstandard2.0 -output out \
+    && test -f out/winrt/base.h && mv out /opt/cppwinrt \
+    && cp tool/LICENSE /opt/cppwinrt/LICENSE.txt \
+    && cd / && rm -rf /tmp/winrt
+
+ENV PATH=/opt/llvm-mingw/bin:$PATH

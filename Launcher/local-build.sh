@@ -71,6 +71,7 @@ sysroot=""
 setup_version=""
 x86_cpu_profile=auto
 extra_cmake_args=()
+build_dir_override=""
 lan=0
 
 usage() {
@@ -107,6 +108,8 @@ Usage: local-build.sh --output-dir DIR [options]
   --cmake-arg ARG                  Extra argument passed verbatim to the CMake configure step
                                    (repeatable), e.g. --cmake-arg -DSDL_X11_XSCRNSAVER=OFF on hosts
                                    missing optional SDL development packages
+  --build-dir DIR                  Native (CMake) build directory (default: WORKSPACE/native-build),
+                                   e.g. to keep a cross build for Windows next to the Linux one
 EOF
 }
 
@@ -134,6 +137,7 @@ while [[ $# -gt 0 ]]; do
         --setup-version) setup_version=$2; shift 2 ;;
         --x86-cpu-profile) x86_cpu_profile=$2; shift 2 ;;
         --cmake-arg) extra_cmake_args+=("$2"); shift 2 ;;
+        --build-dir) build_dir_override=$2; shift 2 ;;
         --lan) lan=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) fail "unknown argument: $1" ;;
@@ -229,7 +233,7 @@ base_metadata=$generated/base_translation_output.json
 base_manifest_dir=$workspace/build/base
 base_manifest=$base_manifest_dir/mkwii_base_manifest.json
 shards=$generated/build_shards
-build=$workspace/native-build
+build=${build_dir_override:-$workspace/native-build}
 translation_provenance=$generated/translation-provenance.json
 toolchain_provenance=$build/toolchain-provenance.json
 retro_root=${retro_rewind_package_dir:-$workspace/PulsarPacks/completed/RetroRewind/RetroRewind6}
@@ -551,8 +555,20 @@ publish_built_product() {
     local target=$1 destination=$2 provenance_profile=$3
     mkdir -p "$destination"
     local exe=$build/$target
-    assert_file "$exe" "Locally compiled game executable"
-    cp -f "$exe" "$destination/$target"
+    if [[ ! -f "$exe" && -f "$build/$target.exe" ]]; then
+        # Cross build for Windows (llvm-mingw): publish the .exe and the DLLs it loads, like
+        # LocalBuild.ps1 does.
+        cp -f "$build/$target.exe" "$destination/$target.exe"
+        local dll
+        for dll in dxcompiler.dll dxil.dll libc++.dll libpng16.dll libunwind.dll libz.dll libzlib1.dll \
+                   SDL3.dll sqlite3.dll webgpu_dawn.dll z.dll noshaders.zip; do
+            [[ -f "$build/$dll" ]] && cp -f "$build/$dll" "$destination/"
+        done
+        [[ -d "$build/config" ]] && cp -rf "$build/config" "$destination/"
+    else
+        assert_file "$exe" "Locally compiled game executable"
+        cp -f "$exe" "$destination/$target"
+    fi
     # cacert.pem is the TLS root bundle the mbed TLS path looks up beside the executable
     # (runtime/src/hle/net/network_ssl.cpp); without it HTTPS fails at runtime.
     for name in dsp_coef.bin initial_pipeline_cache.db cacert.pem; do

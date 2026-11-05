@@ -76,3 +76,5 @@ output.txt
 
 # Operating System
 .DS_Store
+/.release-home/
+/native-build-windows/

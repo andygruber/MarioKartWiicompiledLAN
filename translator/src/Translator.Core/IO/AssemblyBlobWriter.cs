@@ -11,6 +11,16 @@ internal sealed record AssemblyBlob(string FileName, string Symbol, ReadOnlyMemo
 
 internal static class AssemblyBlobWriter
 {
+    // Object format the generated assembly is for: "windows", "macos" or "linux", or the host's.
+    private static readonly string? TargetOverride =
+        Environment.GetEnvironmentVariable("MKW_ASM_TARGET")?.Trim().ToLowerInvariant() is { Length: > 0 } target
+            ? target is "windows" or "macos" or "linux"
+                ? target
+                : throw new InvalidOperationException($"MKW_ASM_TARGET must be windows, macos or linux (got '{target}').")
+            : null;
+    private static bool TargetIsWindows => TargetOverride is null ? OperatingSystem.IsWindows() : TargetOverride == "windows";
+    private static bool TargetIsMacOS => TargetOverride is null ? OperatingSystem.IsMacOS() : TargetOverride == "macos";
+
     public static void Write(
         string assemblyPath,
         string blobDirectory,
@@ -23,12 +33,12 @@ internal static class AssemblyBlobWriter
         var assembly = new StringBuilder();
         foreach (var header in headerLines) assembly.AppendLine(header);
         // PE/COFF (Windows), Mach-O (macOS), and ELF (Linux) spell a read-only data section
-        // differently in GNU-as syntax. The build always targets
-        // whichever platform the translator itself runs on (there is no cross-compilation
-        // support), so that's what this picks the section syntax from.
-        assembly.AppendLine(OperatingSystem.IsWindows()
+        // differently in GNU-as syntax. The build normally targets whichever platform the
+        // translator itself runs on; a cross build (Launcher/release/build-windows.sh) names its
+        // target with MKW_ASM_TARGET instead.
+        assembly.AppendLine(TargetIsWindows
             ? ".section .rdata,\"dr\""
-            : OperatingSystem.IsMacOS()
+            : TargetIsMacOS
                 ? ".section __TEXT,__const"
                 : ".section .rodata,\"a\",@progbits");
         assembly.AppendLine();
@@ -44,7 +54,7 @@ internal static class AssemblyBlobWriter
             // C/C++ external symbols carry a leading underscore in Mach-O,
             // unlike ELF and COFF.  The generated C++ still names the symbol
             // without that ABI decoration, so emit the platform spelling here.
-            var assemblySymbol = OperatingSystem.IsMacOS() ? $"_{blob.Symbol}" : blob.Symbol;
+            var assemblySymbol = TargetIsMacOS ? $"_{blob.Symbol}" : blob.Symbol;
             assembly.AppendLine($".globl {assemblySymbol}");
             assembly.AppendLine($"{assemblySymbol}:");
             var referencePath = Path.Combine(blobReferenceDirectory, blob.FileName);
@@ -56,7 +66,7 @@ internal static class AssemblyBlobWriter
         {
             if (!expectedFiles.Contains(Path.GetFullPath(stalePath))) File.Delete(stalePath);
         }
-        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
+        if (!TargetIsWindows && !TargetIsMacOS)
         {
             // Absence of a .note.GNU-stack section makes the linker assume the oldest, most
             // conservative default for this object (an executable stack) and warn about it; this
