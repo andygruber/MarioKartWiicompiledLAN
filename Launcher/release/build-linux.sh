@@ -3,7 +3,11 @@
 # older distributions too. libstdc++/libgcc are linked statically; the only system libraries
 # needed are glibc, zlib and libpng (plus SDL's runtime-loaded X11/Wayland/audio/Vulkan).
 #
-#   Launcher/release/build-linux.sh [--workspace DIR] [--output-dir DIR]
+#   Launcher/release/build-linux.sh [--workspace DIR] [--output-dir DIR] [--x86-cpu-profile v2|v3]
+#
+# --x86-cpu-profile  v3 (default): AVX2, Intel Haswell (2013) / AMD Excavator (2015) and newer.
+#                    v2: SSE4.2, also runs on older CPUs (Intel Nehalem 2008, AMD Bulldozer 2011).
+#                    v3 builds in WORKSPACE/native-build, v2 in native-build-v2.
 #
 # The workspace needs Assets/ (main.dol, StaticR.rel, DATA/) and
 # Launcher/artifacts/portable-tools/toolchain-x86_64 (Launcher/prepare-portable-tools.sh).
@@ -14,16 +18,22 @@ workspace=$(cd "$script_dir/../.." && pwd)
 output_dir=""
 dotnet_root=${DOTNET_ROOT:-$HOME/.dotnet}
 image=mkwlan-build-linux:22.04
+cpu_profile=v3
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --workspace) workspace=$(cd "$2" && pwd); shift 2 ;;
         --output-dir) output_dir=$2; shift 2 ;;
         --dotnet-root) dotnet_root=$2; shift 2 ;;
+        --x86-cpu-profile) cpu_profile=$2; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+[[ "$cpu_profile" == v2 || "$cpu_profile" == v3 ]] || { echo "--x86-cpu-profile must be v2 or v3" >&2; exit 1; }
 output_dir=${output_dir:-$workspace/out/release-linux}
+# One build directory per profile, so switching does not rebuild everything each time.
+build_dir=/work/native-build
+[[ "$cpu_profile" == v3 ]] || build_dir+=-$cpu_profile
 toolchain=/work/Launcher/artifacts/portable-tools/toolchain-x86_64/bin
 
 [[ -f "$workspace/Assets/main.dol" ]] || { echo "missing $workspace/Assets/main.dol" >&2; exit 1; }
@@ -47,10 +57,10 @@ docker run --rm --security-opt label=disable \
     -v "$workspace:/work" -v "$dotnet_root:/opt/dotnet:ro" -v "$(cd "$output_dir" && pwd):/output" \
     -w /work "$image" \
     bash -c 'mkdir -p "$HOME" && exec "$@"' build \
-    bash Launcher/local-build.sh --lan --output-dir /output \
+    bash Launcher/local-build.sh --lan --output-dir /output --build-dir "$build_dir" \
         --cc "$toolchain/clang" --cxx "$toolchain/clang++" \
         --cmake "$toolchain/cmake" --ninja "$toolchain/ninja" --dotnet /opt/dotnet/dotnet \
-        --x86-cpu-profile v3 \
+        --x86-cpu-profile "$cpu_profile" \
         --cmake-arg "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc" \
         --cmake-arg -DMKW_GLIBC_C23_COMPAT=ON
 
@@ -58,4 +68,4 @@ docker run --rm --security-opt label=disable \
 docker run --rm --security-opt label=disable --user "$(id -u):$(id -g)" \
     -v "$(cd "$output_dir" && pwd):/output" "$image" patchelf --remove-rpath /output/WiiCompiled
 
-echo "Linux build in $output_dir"
+echo "Linux build (x86-64-$cpu_profile) in $output_dir"

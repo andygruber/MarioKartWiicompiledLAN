@@ -118,6 +118,10 @@ Launcher/release/package.sh --game-data Assets/DATA \
     [--windows-build ../out-windows --windows-player out/lan-player/win-x64/LanPlayerSetup.exe]
 ```
 
+Both build scripts default to x86-64-v3 (AVX2). Pass `--x86-cpu-profile v2` for older CPUs
+(SSE4.2, from about 2008); a v2 build gets its own build directory. Tell `package.sh` with
+`--linux-cpu v2` / `--windows-cpu v2`, so the README states the right requirement.
+
 - **Linux** (`Dockerfile.linux`): the repository's portable clang on Ubuntu 22.04. libstdc++ comes
   from GCC 13 (the prebuilt Dawn needs it) and is linked statically. `MKW_GLIBC_C23_COMPAT`
   supplies the four glibc 2.38 `__isoc23_strto*` functions Dawn references. The binary needs only

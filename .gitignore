@@ -78,3 +78,5 @@ output.txt
 .DS_Store
 /.release-home/
 /native-build-windows/
+/native-build-windows-v2/
+/native-build-v2/

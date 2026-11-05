@@ -3,10 +3,12 @@
 #
 #   Launcher/release/package.sh --game-data DIR --linux-build DIR --linux-player FILE \
 #       [--windows-build DIR --windows-player FILE] [--version V] [--output-dir DIR]
+#       [--linux-cpu v2|v3] [--windows-cpu v2|v3]
 #
 # --game-data      the extracted disc's DATA directory (contains sys/ and files/)
 # --*-build        output of build-linux.sh / build-windows.sh
 # --*-player       LanPlayerSetup published for linux-x64 / win-x64
+# --*-cpu          the x86-64 profile the build was made with (default v3), for the README
 #
 # Layout: game/DATA, linux/, windows/, UserData/Config.toml (dvd_root = ../game/DATA) and
 # portable.txt, which makes the runtime keep settings and saves in UserData.
@@ -15,6 +17,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 workspace=$(cd "$script_dir/../.." && pwd)
 game_data="" linux_build="" linux_player="" windows_build="" windows_player=""
+linux_cpu=v3 windows_cpu=v3
 version=$(date +%Y.%m.%d)
 output_dir=$workspace/out/packages
 
@@ -25,6 +28,8 @@ while [[ $# -gt 0 ]]; do
         --linux-player) linux_player=$2; shift 2 ;;
         --windows-build) windows_build=$2; shift 2 ;;
         --windows-player) windows_player=$2; shift 2 ;;
+        --linux-cpu) linux_cpu=$2; shift 2 ;;
+        --windows-cpu) windows_cpu=$2; shift 2 ;;
         --version) version=$2; shift 2 ;;
         --output-dir) output_dir=$2; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 1 ;;
@@ -32,6 +37,14 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -f "$game_data/sys/main.dol" ]] || { echo "--game-data must be an extracted DATA directory" >&2; exit 1; }
 [[ -x "$linux_build/WiiCompiled" && -f "$linux_player" ]] || { echo "--linux-build/--linux-player missing" >&2; exit 1; }
+cpu_text() {
+    case "$1" in
+        v3) echo "with AVX2 (Intel from 2013/Haswell, AMD from 2015/Excavator, any Ryzen)" ;;
+        v2) echo "with SSE4.2 (Intel from 2008/Nehalem, AMD from 2011/Bulldozer)" ;;
+        *) echo "--linux-cpu/--windows-cpu must be v2 or v3" >&2; exit 1 ;;
+    esac
+}
+linux_cpu_text=$(cpu_text "$linux_cpu") windows_cpu_text=$(cpu_text "$windows_cpu")
 with_windows=0
 if [[ -n "$windows_build" ]]; then
     [[ -f "$windows_build/WiiCompiled.exe" && -f "$windows_player" ]] || { echo "--windows-build/--windows-player missing" >&2; exit 1; }
@@ -67,13 +80,14 @@ printf '# Settings for this portable copy (see README.txt).\n[paths]\n# The extr
     > "$root/UserData/Config.toml"
 
 # README: keep the @IF_LINUX@ / @IF_WINDOWS@ blocks this variant contains.
-awk -v windows="$with_windows" -v version="$version" '
+awk -v windows="$with_windows" -v version="$version" \
+    -v linux_cpu="$linux_cpu_text" -v windows_cpu="$windows_cpu_text" '
     BEGIN { keep = -1 }
     /^@IF_LINUX@$/ { keep = 1; next }
     /^@IF_WINDOWS@$/ { keep = windows; next }
     /^@END@$/ { keep = -1; next }
     keep == 0 { next }
-    { gsub(/@VERSION@/, version); print }
+    { gsub(/@VERSION@/, version); gsub(/@LINUX_CPU@/, linux_cpu); gsub(/@WINDOWS_CPU@/, windows_cpu); print }
 ' "$script_dir/README-package.txt" > "$root/README.txt"
 if (( with_windows )); then
     # Windows users open README.txt in Notepad, which is happy with either line ending; CRLF

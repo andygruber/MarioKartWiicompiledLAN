@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Cross-compiles the LAN game for Windows inside Docker (Dockerfile.windows: llvm-mingw, plus
 # Wine for the C++/WinRT headers). Shares the translation with build-linux.sh; the native build
-# goes to WORKSPACE/native-build-windows.
+# goes to WORKSPACE/native-build-windows (v3) or native-build-windows-v2.
 #
-#   Launcher/release/build-windows.sh [--workspace DIR] [--output-dir DIR]
+#   Launcher/release/build-windows.sh [--workspace DIR] [--output-dir DIR] [--x86-cpu-profile v2|v3]
+#
+# --x86-cpu-profile  v3 (default): AVX2, Intel Haswell (2013) / AMD Excavator (2015) and newer.
+#                    v2: SSE4.2, also runs on older CPUs (Intel Nehalem 2008, AMD Bulldozer 2011).
 #
 # Needs the same workspace inputs as build-linux.sh (Assets/, the portable Linux toolchain for
 # cmake/ninja, a .NET 8 SDK).
@@ -19,16 +22,22 @@ workspace=$(cd "$script_dir/../.." && pwd)
 output_dir=""
 dotnet_root=${DOTNET_ROOT:-$HOME/.dotnet}
 image=mkwlan-build-windows:22.04
+cpu_profile=v3
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --workspace) workspace=$(cd "$2" && pwd); shift 2 ;;
         --output-dir) output_dir=$2; shift 2 ;;
         --dotnet-root) dotnet_root=$2; shift 2 ;;
+        --x86-cpu-profile) cpu_profile=$2; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+[[ "$cpu_profile" == v2 || "$cpu_profile" == v3 ]] || { echo "--x86-cpu-profile must be v2 or v3" >&2; exit 1; }
 output_dir=${output_dir:-$workspace/out/release-windows}
+# One build directory per profile, so switching does not rebuild everything each time.
+build_dir=/work/native-build-windows
+[[ "$cpu_profile" == v3 ]] || build_dir+=-$cpu_profile
 tools=/work/Launcher/artifacts/portable-tools/toolchain-x86_64/bin
 mingw=/opt/llvm-mingw/bin
 
@@ -55,12 +64,12 @@ docker run --rm --security-opt label=disable \
     bash -c 'mkdir -p "$HOME" &&
              Launcher/release/mingw-case-headers.sh /work /work/.release-home/mingw-case-include &&
              exec "$@"' build \
-    bash Launcher/local-build.sh --lan --output-dir /output --build-dir /work/native-build-windows \
+    bash Launcher/local-build.sh --lan --output-dir /output --build-dir "$build_dir" \
         --cc "$mingw/x86_64-w64-mingw32-clang" --cxx "$mingw/x86_64-w64-mingw32-clang++" \
         --cmake "$tools/cmake" --ninja "$tools/ninja" --dotnet /opt/dotnet/dotnet \
-        --x86-cpu-profile v3 \
+        --x86-cpu-profile "$cpu_profile" \
         --cmake-arg -DCMAKE_TOOLCHAIN_FILE=/work/Launcher/release/mingw-w64-x86_64.cmake \
         --cmake-arg -DAURORA_DAWN_PROVIDER=package --cmake-arg -DAURORA_SDL3_PROVIDER=vendor \
         --cmake-arg -DMKW_CPPWINRT_INCLUDE_DIR=/opt/cppwinrt
 
-echo "Windows build in $output_dir"
+echo "Windows build (x86-64-$cpu_profile) in $output_dir"

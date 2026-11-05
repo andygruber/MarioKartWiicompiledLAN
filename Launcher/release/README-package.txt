@@ -92,13 +92,14 @@ FILES
 
 REQUIREMENTS
 
-A 64-bit PC with a processor from 2013 or newer (AVX2: Intel Haswell, AMD Excavator / Ryzen).
 @IF_WINDOWS@
 - Windows 10 or 11, 64-bit, with a DirectX 12 or Vulkan capable graphics card.
+  Processor: @WINDOWS_CPU@.
 @END@
 @IF_LINUX@
 - Linux with glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch, SteamOS, ...)
-  and a Vulkan driver. If the game finds none, install it:
+  Processor: @LINUX_CPU@.
+  A Vulkan driver is needed too. If the game finds none, install it:
     Fedora          sudo dnf install mesa-vulkan-drivers vulkan-loader
     Ubuntu, Debian  sudo apt install mesa-vulkan-drivers libvulkan1
     NVIDIA          the NVIDIA driver includes it
