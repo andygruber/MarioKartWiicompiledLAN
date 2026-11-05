@@ -128,6 +128,77 @@ static in_addr ResolveDefaultInterfaceIp() {
     return local.sin_addr;
 }
 
+// Directed broadcast addresses (network byte order) of the host's IPv4 interfaces that are up,
+// loopback excluded. A Wii has one interface, so a guest broadcast to 255.255.255.255 reaches
+// the whole LAN. A PC often has several (VPN, Hyper-V/WSL, VirtualBox), and Windows sends a
+// limited broadcast out of only one of them, which need not be the LAN. Refreshed every few
+// seconds so a plugged-in cable or a VPN coming up is picked up without a restart.
+static std::vector<uint32_t> HostBroadcastAddresses() {
+    using Clock = std::chrono::steady_clock;
+    static std::mutex mutex;
+    static std::vector<uint32_t> cached;
+    static Clock::time_point refreshed{};
+    std::lock_guard<std::mutex> lock(mutex);
+    const Clock::time_point now = Clock::now();
+    if (refreshed != Clock::time_point{} && now - refreshed < std::chrono::seconds(5)) {
+        return cached;
+    }
+    refreshed = now;
+    cached.clear();
+    const auto add = [](uint32_t broadcast) {
+        if (broadcast != htonl(INADDR_BROADCAST) &&
+            std::find(cached.begin(), cached.end(), broadcast) == cached.end()) {
+            cached.push_back(broadcast);
+        }
+    };
+#ifdef _WIN32
+    ULONG size = 16 * 1024;
+    std::vector<uint8_t> buffer;
+    ULONG rc = ERROR_BUFFER_OVERFLOW;
+    for (int attempt = 0; attempt < 3 && rc == ERROR_BUFFER_OVERFLOW; ++attempt) {
+        buffer.resize(size);
+        rc = GetAdaptersAddresses(AF_INET,
+                                  GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                                      GAA_FLAG_SKIP_DNS_SERVER,
+                                  nullptr, reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data()),
+                                  &size);
+    }
+    if (rc == NO_ERROR) {
+        for (auto* adapter = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data()); adapter;
+             adapter = adapter->Next) {
+            if (adapter->OperStatus != IfOperStatusUp ||
+                adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK) {
+                continue;
+            }
+            for (auto* unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next) {
+                const auto* address = reinterpret_cast<const sockaddr_in*>(unicast->Address.lpSockaddr);
+                const ULONG prefix = unicast->OnLinkPrefixLength;
+                if (!address || address->sin_family != AF_INET || prefix == 0 || prefix > 30) {
+                    continue;
+                }
+                const uint32_t mask = 0xFFFFFFFFu << (32 - prefix);
+                add(htonl(ntohl(address->sin_addr.s_addr) | ~mask));
+            }
+        }
+    }
+#else
+    ifaddrs* list = nullptr;
+    if (getifaddrs(&list) == 0) {
+        for (const ifaddrs* entry = list; entry; entry = entry->ifa_next) {
+            if (!entry->ifa_addr || entry->ifa_addr->sa_family != AF_INET ||
+                !(entry->ifa_flags & IFF_UP) || !(entry->ifa_flags & IFF_RUNNING) ||
+                (entry->ifa_flags & IFF_LOOPBACK) ||
+                !(entry->ifa_flags & IFF_BROADCAST) || !entry->ifa_broadaddr) {
+                continue;
+            }
+            add(reinterpret_cast<const sockaddr_in*>(entry->ifa_broadaddr)->sin_addr.s_addr);
+        }
+        freeifaddrs(list);
+    }
+#endif
+    return cached;
+}
+
 static int32_t HandleInetAton(uint32_t inBuf, uint32_t inLen, uint32_t outBuf, uint32_t outLen) {
     if (!inBuf || !outBuf || outLen < 4) {
         return 0;
@@ -464,9 +535,25 @@ int32_t HandleIpTopIoctlv(uint32_t cmd, const std::vector<IoVector>& in, const s
         const bool patchedWrite = nasAction == NasSslWriteAction::Ready;
         const uint8_t* sendData = patchedWrite ? patched.data() : data;
         const uint32_t sendSize = patchedWrite ? static_cast<uint32_t>(patched.size()) : in[0].size;
-        const int ret = sendto(s->native, reinterpret_cast<const char*>(sendData), static_cast<int>(sendSize),
-                               static_cast<int>(flags), destPtr, destLen);
-        const int hostError = ret < 0 ? NativeLastError() : 0;
+        int ret = sendto(s->native, reinterpret_cast<const char*>(sendData), static_cast<int>(sendSize),
+                         static_cast<int>(flags), destPtr, destLen);
+        int hostError = ret < 0 ? NativeLastError() : 0;
+        if (destPtr && s->type == SOCK_DGRAM && dest.sin_addr.s_addr == htonl(INADDR_BROADCAST)) {
+            // Also broadcast on every interface (see HostBroadcastAddresses). Receivers on the
+            // interface Windows picked get the datagram twice; broadcast users (LAN discovery)
+            // are fine with that.
+            for (const uint32_t broadcast : HostBroadcastAddresses()) {
+                sockaddr_in directed = dest;
+                directed.sin_addr.s_addr = broadcast;
+                const int sent = sendto(s->native, reinterpret_cast<const char*>(sendData),
+                                        static_cast<int>(sendSize), static_cast<int>(flags),
+                                        reinterpret_cast<const sockaddr*>(&directed), sizeof(directed));
+                if (ret < 0 && sent >= 0) {
+                    ret = sent;
+                    hostError = 0;
+                }
+            }
+        }
         // Diagnostics may change the native error; use the send result captured above.
         int32_t result = ret >= 0 ? SocketResult(ret) : SocketErrorResult(hostError);
         if (patchedWrite && ret == static_cast<int>(sendSize)) {

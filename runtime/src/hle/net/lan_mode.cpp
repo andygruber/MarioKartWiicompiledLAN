@@ -415,6 +415,24 @@ void ProcessBroadcast(uint32_t packet, uint32_t ip, uint16_t port) {
     }
 }
 
+// A status message carries its sender's PID and game port, and arrives from its control port.
+// Remember the sender, so a reply has somewhere to go even when its broadcasts never reach us
+// (a firewall, a VPN or virtual adapter, Wi-Fi isolation). Without this the host could not
+// answer a join request from such a console, and DWC closed the whole room.
+void NoteStatusSender(uint32_t pid, uint32_t ip, uint16_t port, uint16_t communicationPort) {
+    if (pid <= kMaxLanPeers || ip == 0 || port == 0) return;
+    const bool known = FindPeerByPid(pid) != -1;
+    const int index = FindOrAllocPeer(ip, port, pid);
+    if (index == -1) return;
+    TrackedPeer& peer = g_trackedPeers[index];
+    peer.controlPort = port;
+    if (communicationPort != 0) peer.info.communicationPort = communicationPort;
+    if (!known) {
+        RT_LOGF(RT_TAG_NET, "[lan] learned peer pid=%u from its status message (no broadcast seen)\n",
+                pid);
+    }
+}
+
 void ProcessStatus(CpuContext* ctx, uint32_t buffer, int32_t length, uint32_t ip, uint16_t port) {
     RT_LOGF(RT_TAG_NET, "[lan] receive size %d from %08x:%u\n", length, ip, port);
     if (length < 0x14) return;
@@ -422,6 +440,8 @@ void ProcessStatus(CpuContext* ctx, uint32_t buffer, int32_t length, uint32_t ip
     if (length < 0x14 + static_cast<int32_t>((header >> 16) & 0xFF)) return;
     if (Memory::Read32(buffer) != kStatusMagic) return;
     RT_LOGF(RT_TAG_NET, "[lan] receive status message %u from %08x:%u\n", header >> 24, ip, port);
+    NoteStatusSender(__builtin_bswap32(Memory::Read32(buffer + 16)), ip, port,
+                     static_cast<uint16_t>(header & 0xFFFF));
     const uint32_t gamedata = DwcGamedata();
     if (gamedata == 0) return;
     Memory::Write32(gamedata + kGdPublicIp, kFakePublicIp);
@@ -934,9 +954,18 @@ REGISTER_NATIVE_WRAPPER_AS(0x800DB614, Lan_DWCi_SBUpdateAsync_800db614, "Lan_DWC
 // int dwc_send_status_record(int type, u32 pid, u32 ip, u16 port, const u32 *packet, size_t words)
 extern "C" void Lan_dwc_send_status_record_800dbd38(CpuContext* ctx) {
     if (!Active()) return MKW_GUEST_NEXT(800DBD38)(ctx);
-    const bool sent = SendStatusRecord(ctx, ctx->gpr[3], ctx->gpr[4], ctx->gpr[5],
+    const uint32_t pid = ctx->gpr[4];
+    const bool sent = SendStatusRecord(ctx, ctx->gpr[3], pid, ctx->gpr[5],
                                        static_cast<uint16_t>(ctx->gpr[6]), ctx->gpr[7], ctx->gpr[8]);
-    ctx->gpr[3] = sent ? 0 : 1;
+    // DWC treats a failed send as fatal and closes the room. For a host that punishes everybody
+    // for one console it cannot reach, so the host counts it as a lost datagram instead; DWC's
+    // own timeouts then drop the half-joined console. A joining console keeps the error, which
+    // ends its join attempt quickly.
+    const bool hosting = g_gameState == 3 || g_gameState == 11;
+    if (!sent && hosting) {
+        RT_LOGF(RT_TAG_NET, "[lan] host: status record to %u not delivered, room kept open\n", pid);
+    }
+    ctx->gpr[3] = sent || hosting ? 0 : 1;
 }
 REGISTER_NATIVE_WRAPPER_AS(0x800DBD38, Lan_dwc_send_status_record_800dbd38, "Lan_dwc_send_status_record_800dbd38");
 

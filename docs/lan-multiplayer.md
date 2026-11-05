@@ -75,6 +75,12 @@ LanPlayerSetup --no-gui --list                     # list the Miis in the databa
 
 - Discovery uses UDP broadcasts to ports **27900-27929**. Each instance binds the first free port
   in that range, so up to 30 instances can find each other.
+- A broadcast goes to 255.255.255.255 and also to the broadcast address of every network adapter
+  that is up. Windows sends a 255.255.255.255 broadcast out of only one adapter, which can be a
+  VPN, Hyper-V/WSL or VirtualBox adapter instead of the LAN.
+- A host also learns a player from their join request, so a console whose broadcasts don't
+  arrive can still join. If the host can't answer a console at all, it treats that as a lost
+  packet and keeps the room open; before, DWC closed the room for everyone.
 - Race traffic uses a UDP port picked by the game. If that port is taken, a free port is used
   instead.
 - Allow WiiCompiled through the firewall for UDP on the LAN, for example

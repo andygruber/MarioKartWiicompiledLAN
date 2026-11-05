@@ -52,6 +52,8 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <poll.h>
 #include <sys/socket.h>
