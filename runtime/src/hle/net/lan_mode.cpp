@@ -27,10 +27,12 @@
 #include "guest_function_imports.h"
 #include "guest_patch_set.h"
 #include "guest_small_data.h"
+#include "hle_stubs.h"
 #include "memory.h"
 #include "runtime_log.h"
 #include "timebase_contract.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -807,6 +809,89 @@ void NetworkThreadMain(CpuContext* ctx) {
     ctx->gpr[3] = 0;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Wall-clock finish times (PC only, not part of the module).
+//
+// The race clock counts game frames. A Wii never drops one, but a PC that cannot keep up runs
+// the game slower, so its race clock falls behind real time and its player posts a time that is
+// too short. Online results are ordered by the finish times the consoles report, so the slow
+// PC's player could cross the line after everybody else and still win. The emulated VI retrace
+// follows the wall clock, so "retraces elapsed - game frames run" since the countdown started is
+// exactly how far this console fell behind; it is added to the local player's finish time.
+// At full speed it is 0 and the time is unchanged.
+// ---------------------------------------------------------------------------------------------
+
+constexpr uint32_t kRaceinfoStage = 0x28;          // 0 intro, 1 countdown, 2 race, 3+ over
+constexpr uint32_t kRaceinfoPlayerIndex = 0x08;
+constexpr uint32_t kRacedata = 0x809BD728;         // Racedata *
+constexpr uint32_t kRacedataPlayerStride = 0xF0, kRacedataPlayerLocalSlot = 0x2E; // s8, -1 remote/CPU
+constexpr uint32_t kTimerMinutes = 0x04, kTimerSeconds = 0x06, kTimerMillis = 0x08;
+// EndRace's callers for a racing player: EndLap when the player crosses the line after the last
+// lap, UpdateRealLocal when the race ends before the player gets there (an estimated time).
+// Remote players end through GMDataOnlineVS with the time their console sent; that stays.
+constexpr uint32_t kFinishLineReturn = 0x80534C24, kEstimatedFinishReturn = 0x80534668;
+constexpr double kGameFrameMs = 1001.0 / 60.0;     // the race clock's frame (59.94 Hz)
+
+struct RaceClock {
+    uint32_t raceinfo = 0;
+    bool anchored = false;
+    uint32_t retraceAnchor = 0;
+    uint32_t frames = 0;
+};
+RaceClock g_raceClock;
+
+// After each Raceinfo::Update: anchor when the countdown starts, then count game frames.
+void TrackRaceClock(uint32_t raceinfo) {
+    const uint32_t stage = Memory::Read32(raceinfo + kRaceinfoStage);
+    if (raceinfo != g_raceClock.raceinfo || stage == 0) {
+        g_raceClock = {};
+        g_raceClock.raceinfo = raceinfo;
+    }
+    if (stage == 0) return;
+    if (!g_raceClock.anchored) {
+        g_raceClock.anchored = true;
+        g_raceClock.retraceAnchor = VI_HLE_RetraceCount();
+        g_raceClock.frames = 0;
+        RT_LOGF(RT_TAG_NET, "[lan] race clock: countdown started\n");
+        return;
+    }
+    ++g_raceClock.frames;
+}
+
+void AddRaceLagToFinishTime(uint32_t player, uint32_t timer) {
+    if (!g_raceClock.anchored || player == 0 || timer == 0) return;
+    const uint32_t racedata = Memory::Read32(kRacedata);
+    const uint32_t index = Memory::Read8(player + kRaceinfoPlayerIndex);
+    if (racedata == 0 ||
+        static_cast<int8_t>(Memory::Read8(racedata + index * kRacedataPlayerStride +
+                                          kRacedataPlayerLocalSlot)) < 0) {
+        return;
+    }
+    const uint32_t retraces = VI_HLE_RetraceCount() - g_raceClock.retraceAnchor;
+    const int64_t lagFrames =
+        std::max<int64_t>(0, static_cast<int64_t>(retraces) - static_cast<int64_t>(g_raceClock.frames));
+    const uint32_t minutes = Memory::Read16(timer + kTimerMinutes);
+    const uint32_t seconds = Memory::Read8(timer + kTimerSeconds);
+    const uint32_t millis = Memory::Read16(timer + kTimerMillis);
+    const int64_t before = static_cast<int64_t>(minutes) * 60000 + seconds * 1000 + millis;
+    const int64_t after = std::min<int64_t>(
+        before + static_cast<int64_t>(static_cast<double>(lagFrames) * kGameFrameMs + 0.5),
+        99 * 60000 + 59 * 1000 + 999);
+    // Offline races (time trials included) keep the game's own time; the line is still logged,
+    // so a slow PC shows up in the log.
+    const bool online = g_networkThreadRunning;
+    RT_LOGF(RT_TAG_NET,
+            "[lan] finish: %u game frames, %u wall-clock frames, %lld behind; time %u:%02u.%03u -> "
+            "%u:%02u.%03u%s\n",
+            g_raceClock.frames, retraces, static_cast<long long>(lagFrames), minutes, seconds, millis,
+            static_cast<unsigned>(after / 60000), static_cast<unsigned>(after / 1000 % 60),
+            static_cast<unsigned>(after % 1000), online ? "" : " (offline race: not applied)");
+    if (!online || after == before) return;
+    Memory::Write16(timer + kTimerMinutes, static_cast<uint16_t>(after / 60000));
+    Memory::Write8(timer + kTimerSeconds, static_cast<uint8_t>(after / 1000 % 60));
+    Memory::Write16(timer + kTimerMillis, static_cast<uint16_t>(after % 1000));
+}
+
 } // namespace
 } // namespace MkwLan
 
@@ -976,6 +1061,27 @@ extern "C" void Lan_ServerBrowserGetMyPublicIPAddr_8011e510(CpuContext* ctx) {
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8011E510, Lan_ServerBrowserGetMyPublicIPAddr_8011e510,
                            "Lan_ServerBrowserGetMyPublicIPAddr_8011e510");
+
+// void Raceinfo::Update(Raceinfo *): once per game frame during a race; drives the race clock
+// comparison above.
+extern "C" void Lan_Raceinfo_Update_805331b4(CpuContext* ctx) {
+    if (!Active()) return MKW_GUEST_NEXT(805331B4)(ctx);
+    const uint32_t raceinfo = ctx->gpr[3];
+    MKW_GUEST_NEXT(805331B4)(ctx);
+    TrackRaceClock(raceinfo);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x805331B4, Lan_Raceinfo_Update_805331b4, "Lan_Raceinfo_Update_805331b4");
+
+// void RaceinfoPlayer::EndRace(RaceinfoPlayer *, const Timer *finishTime, bool, u32 reason)
+extern "C" void Lan_RaceinfoPlayer_EndRace_805347f4(CpuContext* ctx) {
+    if (Active() && (ctx->lr == kFinishLineReturn || ctx->lr == kEstimatedFinishReturn)) {
+        // The timer is the caller's stack temporary; EndRace copies it into the player.
+        AddRaceLagToFinishTime(ctx->gpr[3], ctx->gpr[4]);
+    }
+    MKW_GUEST_NEXT(805347F4)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x805347F4, Lan_RaceinfoPlayer_EndRace_805347f4,
+                           "Lan_RaceinfoPlayer_EndRace_805347f4");
 
 // so_ret_t SOBind(so_fd_t fd, const so_addr_t *addr). DWC picks a random game port, which on a
 // PC may already be taken; while the network thread creates the game socket, retry a failed

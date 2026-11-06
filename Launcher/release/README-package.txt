@@ -48,6 +48,9 @@ PLAYING ON THE LAN
 Things to know:
 - Up to 12 players. Character, kart and track selection has the usual 30 seconds.
 - Idling no longer disconnects you.
+- Finish times follow the real clock: if a PC can't keep 60 fps, its player's time is
+  corrected, so a slow PC no longer wins races it finished later. If that PC drops frames a
+  lot, lower its resolution in the F10 settings.
 - After a disconnect, leave the LAN menu on every PC and enter it again.
 - Rankings, ghost uploads and the Mario Kart Channel are turned off.
 

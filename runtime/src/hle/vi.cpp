@@ -424,6 +424,11 @@ bool VI_HLE_IsAdvancingRetrace() {
     return s_inAdvanceRetrace.load(std::memory_order_acquire);
 }
 
+uint32_t VI_HLE_RetraceCount() {
+    std::lock_guard<std::mutex> lock(g_viMutex);
+    return g_vi.retraceCount;
+}
+
 // Advance every retrace whose interval has already elapsed. Safe to call from
 // busy loops (GX drawing, the scheduler's idle spin) to keep VBlank ticking.
 void VI_HLE_PollRetrace(CpuContext* ctx) {

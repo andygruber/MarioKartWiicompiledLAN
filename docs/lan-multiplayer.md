@@ -90,6 +90,23 @@ LanPlayerSetup --no-gui --list                     # list the Miis in the databa
   same v0.9-Luporion.2 module can join too. Mixing with the original fixed-port v0.9 module is
   not guaranteed to work.
 
+### Finish times on a slow PC
+
+The race clock counts game frames. A Wii never drops one, but a PC that can't keep up runs the
+game slower, so its clock falls behind real time and its player posts too short a time. Online
+results are ordered by the reported times, so that player could win a race they finished last.
+In a LAN race the port therefore adds the time this PC fell behind the wall clock since the
+countdown started to the local player's finish time. At full speed nothing changes. Each finish
+is logged, for example:
+
+```
+[lan] finish: 6254 game frames, 6266 wall-clock frames, 12 behind; time 1:40.349 -> 1:40.549
+```
+
+A PC that is often more than a few frames behind is too slow for its settings: lower the
+resolution multiplier, or check the power plan. Offline races, time trials included, keep the
+game's own time; the line is still logged there.
+
 ### Known limitations
 
 The game's idle disconnect is turned off: the patch set includes Bully's

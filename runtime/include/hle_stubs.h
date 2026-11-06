@@ -17,6 +17,8 @@ void VI_HLE_WaitForNextRetracePoll();
 // for the GXCopyDisp producer path and false for retrace-context presents.
 void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace);
 bool VI_HLE_IsAdvancingRetrace();
+// Retraces delivered so far; they follow the wall clock, not the game's frame rate.
+uint32_t VI_HLE_RetraceCount();
 void VI_HLE_SetXfbReady(uint32_t xfbAddr); // Called by GXCopyDisp to signal EFB→XFB copy
 void Audio_HLE_Tick(CpuContext* ctx, uint32_t deltaMicros);
 void Audio_HLE_Poll(CpuContext* ctx);
